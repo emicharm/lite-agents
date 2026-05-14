@@ -110,6 +110,19 @@ static int f_draw_text(lua_State *L) {
 }
 
 
+static int f_draw_image(lua_State *L) {
+  RenImage **img = luaL_checkudata(L, 1, API_TYPE_IMAGE);
+  RenRect rect;
+  rect.x      = luaL_checknumber(L, 2);
+  rect.y      = luaL_checknumber(L, 3);
+  rect.width  = luaL_checknumber(L, 4);
+  rect.height = luaL_checknumber(L, 5);
+  RenColor color = checkcolor(L, 6, 255);
+  rencache_draw_image(*img, rect, color);
+  return 0;
+}
+
+
 static const luaL_Reg lib[] = {
   { "show_debug",    f_show_debug    },
   { "get_size",      f_get_size      },
@@ -120,15 +133,19 @@ static const luaL_Reg lib[] = {
   { "draw_rounded_rect", f_draw_rounded_rect },
   { "draw_corner_mask",  f_draw_corner_mask  },
   { "draw_text",         f_draw_text         },
+  { "draw_image",        f_draw_image        },
   { NULL,            NULL            }
 };
 
 
 int luaopen_renderer_font(lua_State *L);
+int luaopen_renderer_image(lua_State *L);
 
 int luaopen_renderer(lua_State *L) {
   luaL_newlib(L, lib);
   luaopen_renderer_font(L);
   lua_setfield(L, -2, "font");
+  luaopen_renderer_image(L);
+  lua_setfield(L, -2, "image");
   return 1;
 }

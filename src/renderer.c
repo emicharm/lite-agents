@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <math.h>
 #include "lib/stb/stb_truetype.h"
+#include "lib/stb/stb_image.h"
 #include "renderer.h"
 
 #define MAX_GLYPHSET 256
@@ -102,6 +103,26 @@ RenImage* ren_new_image(int width, int height) {
 
 void ren_free_image(RenImage *image) {
   free(image);
+}
+
+
+/* Load an image file via stb_image. Returns NULL on failure. Pixels are
+** stored in the same BGRA byte order ren_draw_image expects (the same order
+** the SDL window surface uses), so they can be drawn directly.
+*/
+RenImage* ren_load_image_file(const char *filename) {
+  int w, h, n;
+  unsigned char *raw = stbi_load(filename, &w, &h, &n, 4);
+  if (!raw) { return NULL; }
+  RenImage *image = ren_new_image(w, h);
+  for (int i = 0; i < w * h; i++) {
+    image->pixels[i].r = raw[i * 4 + 0];
+    image->pixels[i].g = raw[i * 4 + 1];
+    image->pixels[i].b = raw[i * 4 + 2];
+    image->pixels[i].a = raw[i * 4 + 3];
+  }
+  stbi_image_free(raw);
+  return image;
 }
 
 
@@ -402,6 +423,42 @@ void ren_draw_image(RenImage *image, RenRect *sub, int x, int y, RenColor color)
     }
     d += dr;
     s += sr;
+  }
+}
+
+
+/* Draw an image scaled to dst with nearest-neighbour sampling, tinted by
+** `color` (each source pixel is multiplied by color, then alpha-blended onto
+** the surface). The source image is expected in the same BGRA byte order as
+** ren_new_image returns. */
+void ren_draw_image_scaled(RenImage *image, RenRect dst, RenColor color) {
+  if (color.a == 0 || dst.width <= 0 || dst.height <= 0) { return; }
+
+  int x0 = dst.x;
+  int y0 = dst.y;
+  int x1 = dst.x + dst.width;
+  int y1 = dst.y + dst.height;
+  if (x0 < clip.left)    x0 = clip.left;
+  if (y0 < clip.top)     y0 = clip.top;
+  if (x1 > clip.right)   x1 = clip.right;
+  if (y1 > clip.bottom)  y1 = clip.bottom;
+  if (x0 >= x1 || y0 >= y1) { return; }
+
+  SDL_Surface *surf = SDL_GetWindowSurface(window);
+  RenColor *d = (RenColor*) surf->pixels;
+  int dst_w = dst.width, dst_h = dst.height;
+  int src_w = image->width, src_h = image->height;
+
+  for (int py = y0; py < y1; py++) {
+    int sy = (py - dst.y) * src_h / dst_h;
+    if (sy < 0) sy = 0; else if (sy >= src_h) sy = src_h - 1;
+    RenColor *srow = image->pixels + sy * src_w;
+    RenColor *drow = d + py * surf->w;
+    for (int px = x0; px < x1; px++) {
+      int sx = (px - dst.x) * src_w / dst_w;
+      if (sx < 0) sx = 0; else if (sx >= src_w) sx = src_w - 1;
+      drow[px] = blend_pixel2(drow[px], srow[sx], color);
+    }
   }
 }
 

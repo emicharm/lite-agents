@@ -11,13 +11,14 @@
 #define CELL_SIZE 96
 #define COMMAND_BUF_SIZE (1024 * 512)
 
-enum { FREE_FONT, SET_CLIP, DRAW_TEXT, DRAW_RECT, DRAW_ROUNDED_RECT, DRAW_CORNER_MASK };
+enum { FREE_FONT, SET_CLIP, DRAW_TEXT, DRAW_RECT, DRAW_ROUNDED_RECT, DRAW_CORNER_MASK, DRAW_IMAGE };
 
 typedef struct {
   int type, size;
   RenRect rect;
   RenColor color;
   RenFont *font;
+  RenImage *image;
   int tab_width;
   int radius;
   char text[0];
@@ -148,6 +149,17 @@ void rencache_draw_corner_mask(RenRect rect, int radius, RenColor color) {
     cmd->rect = rect;
     cmd->color = color;
     cmd->radius = radius;
+  }
+}
+
+
+void rencache_draw_image(RenImage *image, RenRect rect, RenColor color) {
+  if (!image || !rects_overlap(screen_rect, rect)) { return; }
+  Command *cmd = push_command(DRAW_IMAGE, sizeof(Command));
+  if (cmd) {
+    cmd->rect  = rect;
+    cmd->color = color;
+    cmd->image = image;
   }
 }
 
@@ -287,6 +299,9 @@ void rencache_end_frame(void) {
         case DRAW_TEXT:
           ren_set_font_tab_width(cmd->font, cmd->tab_width);
           ren_draw_text(cmd->font, cmd->text, cmd->rect.x, cmd->rect.y, cmd->color);
+          break;
+        case DRAW_IMAGE:
+          ren_draw_image_scaled(cmd->image, cmd->rect, cmd->color);
           break;
       }
     }

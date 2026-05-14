@@ -25,8 +25,11 @@ static const char* button_name(int button) {
 }
 
 
-static char* key_name(char *dst, int sym) {
-  strcpy(dst, SDL_GetKeyName(sym));
+/* Use the SDL scancode rather than the (layout-translated) keycode so that
+** ctrl+f stays bound to ctrl+f regardless of the active keyboard layout —
+** Cyrillic, Greek, AZERTY, etc. all map the physical key to the same name. */
+static char* key_name(char *dst, int scancode) {
+  strcpy(dst, SDL_GetScancodeName(scancode));
   char *p = dst;
   while (*p) {
     *p = tolower(*p);
@@ -84,12 +87,12 @@ top:
 
     case SDL_KEYDOWN:
       lua_pushstring(L, "keypressed");
-      lua_pushstring(L, key_name(buf, e.key.keysym.sym));
+      lua_pushstring(L, key_name(buf, e.key.keysym.scancode));
       return 2;
 
     case SDL_KEYUP:
       lua_pushstring(L, "keyreleased");
-      lua_pushstring(L, key_name(buf, e.key.keysym.sym));
+      lua_pushstring(L, key_name(buf, e.key.keysym.scancode));
       return 2;
 
     case SDL_TEXTINPUT:
