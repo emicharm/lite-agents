@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cflags="-Wall -O3 -g -std=gnu11 -fno-strict-aliasing -Isrc"
+cflags="-Wall -O3 -g -std=gnu11 -fno-strict-aliasing -Isrc -Isrc/lib/vterm/include -Wno-unused-parameter -Wno-unused-but-set-variable -Wno-implicit-fallthrough"
 lflags="-lSDL2 -lm"
 
 if [[ $* == *windows* ]]; then

@@ -8,6 +8,7 @@
 #define API_TYPE_FONT  "Font"
 #define API_TYPE_IMAGE "Image"
 #define API_TYPE_PTY   "Pty"
+#define API_TYPE_VTERM "VTerm"
 
 void api_load_libs(lua_State *L);
 
