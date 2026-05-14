@@ -299,7 +299,7 @@ function SessionsSidebar:draw()
       end
       local color = hovered and style.accent or style.text
       local cx = x + style.padding.x
-      common.draw_text(style.font, color, self.hovered.ref.show_more and "Show less" or "Show more", nil, cx, y, 0, rh)
+      common.draw_text(style.font, color, ref.show_more and "Show less" or "Show more", nil, cx, y, 0, rh)
 
     else -- session
       local selected = (self.selected == ref)

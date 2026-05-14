@@ -42,4 +42,27 @@ style.syntax["string"] = { common.color "#f7c95c" }
 style.syntax["operator"] = { common.color "#93DDFA" }
 style.syntax["function"] = { common.color "#93DDFA" }
 
+-- ANSI 16-color palette used by the terminal plugin. Themes can override this
+-- to retune how `\e[3Xm`/`\e[9Xm` sequences look. Index 0..7 are the base
+-- colors, 8..15 are the "bright" variants. Default fg/bg fall back to
+-- style.text / style.background and are handled separately.
+style.terminal_palette = {
+  { common.color "#3a3a40" }, -- 0 black (slightly above bg so black-on-default reads)
+  { common.color "#F77483" }, -- 1 red          (syntax.keyword2)
+  { common.color "#89D185" }, -- 2 green
+  { common.color "#F7C95C" }, -- 3 yellow       (syntax.string)
+  { common.color "#93DDFA" }, -- 4 blue         (syntax.operator/function)
+  { common.color "#E58AC9" }, -- 5 magenta      (syntax.keyword)
+  { common.color "#6FD0E0" }, -- 6 cyan
+  { common.color "#97979C" }, -- 7 white        (style.text)
+  { common.color "#676B6F" }, -- 8 bright black (syntax.comment)
+  { common.color "#FF9CA8" }, -- 9 bright red
+  { common.color "#A3E3A0" }, -- 10 bright green
+  { common.color "#FFA94D" }, -- 11 bright yellow (syntax.number)
+  { common.color "#B6E6FF" }, -- 12 bright blue
+  { common.color "#F3B0DD" }, -- 13 bright magenta
+  { common.color "#A5E6F0" }, -- 14 bright cyan
+  { common.color "#E1E1E6" }, -- 15 bright white  (style.accent)
+}
+
 return style

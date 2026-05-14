@@ -184,7 +184,7 @@ function SessionView:new(session)
     core.redraw = true
     -- Then tail.
     while sv.alive ~= false do
-      coroutine.yield(0.5)
+      coroutine.yield(0.15)
       local new, no = data.tail_session(session.path, session.source, sv.tail_off)
       sv.tail_off = no
       if #new > 0 then
@@ -286,10 +286,17 @@ end
 -- ── Mouse + scroll ────────────────────────────────────────────────────────
 
 function SessionView:_pin_to_bottom()
-  -- Stay pinned at the bottom until the user scrolls up.
+  -- Stay pinned at the bottom until the user scrolls up; re-engage when they
+  -- scroll back to (or near) the bottom.
   local max = self:get_scrollable_size() - self.size.y
   if max < 0 then max = 0 end
   if self._was_at_bottom == nil then self._was_at_bottom = true end
+  if not self._was_at_bottom and not self.dragging_scrollbar then
+    local threshold = style.font:get_height() * 2
+    if self.scroll.to.y >= max - threshold then
+      self._was_at_bottom = true
+    end
+  end
   if self._was_at_bottom then
     self.scroll.to.y = max
     self.scroll.y    = max

@@ -7,9 +7,15 @@
 **   vt:get_size()                    -> rows, cols
 **   vt:get_cell(row, col)            -> { ch, width, fg, bg, bold, italic,
 **                                          underline, reverse, strike, blink }
+**                                      row < 0 indexes scrollback: -1 is the
+**                                      most recently scrolled-off line.
 **   vt:get_cursor()                  -> row, col
+**   vt:get_scrollback_count()        -> n  (lines available above row 0)
 **   vt:keyboard_unichar(cp, mods)
 **   vt:keyboard_key(name, mods)      -- name in {"enter","tab","up",...,"f12"}
+**   vt:keyboard_start_paste()        -- emits \e[200~ iff bracketed paste is on
+**   vt:keyboard_end_paste()          -- emits \e[201~ iff bracketed paste is on
+**   vt:set_palette_color(idx, r, g, b) -- override the ANSI 16-color palette
 **
 ** Mods may be an integer bitfield or a table { ctrl=true, shift=true, alt=true }.
 */
@@ -22,10 +28,22 @@
 
 #include "vterm.h"
 
+#define SB_CAPACITY 10000  /* lines of scrollback retained per terminal */
+
+typedef struct {
+  VTermScreenCell *cells;
+  int              cap_cols;  /* allocated cells in this row */
+  int              n_cols;    /* valid cells (the rest are blank) */
+} SBLine;
+
 typedef struct {
   VTerm        *vt;
   VTermScreen  *screen;
   VTermState   *state;
+  SBLine       *sb;           /* ring buffer of past lines */
+  int           sb_capacity;  /* == SB_CAPACITY */
+  int           sb_head;      /* index of next slot to write */
+  int           sb_count;     /* valid lines in the ring (≤ capacity) */
 } LuaVTerm;
 
 
@@ -34,16 +52,72 @@ static LuaVTerm* check_term(lua_State *L, int idx) {
 }
 
 
+/* Scrollback callbacks: libvterm calls sb_pushline when a line scrolls off
+** the top of the visible screen, and sb_popline if it needs the most recent
+** scrollback line back (e.g. the screen grew taller after a resize). */
+static int sb_pushline(int cols, const VTermScreenCell *cells, void *user) {
+  LuaVTerm *t = (LuaVTerm *) user;
+  SBLine *line = &t->sb[t->sb_head];
+  if (line->cap_cols < cols) {
+    VTermScreenCell *p = (VTermScreenCell *) realloc(line->cells,
+                                          sizeof(VTermScreenCell) * cols);
+    if (!p) return 1;
+    line->cells = p;
+    line->cap_cols = cols;
+  }
+  memcpy(line->cells, cells, sizeof(VTermScreenCell) * cols);
+  line->n_cols = cols;
+  t->sb_head = (t->sb_head + 1) % t->sb_capacity;
+  if (t->sb_count < t->sb_capacity) t->sb_count++;
+  return 1;
+}
+
+static int sb_popline(int cols, VTermScreenCell *cells, void *user) {
+  LuaVTerm *t = (LuaVTerm *) user;
+  if (t->sb_count == 0) return 0;
+  t->sb_head = (t->sb_head - 1 + t->sb_capacity) % t->sb_capacity;
+  t->sb_count--;
+  SBLine *line = &t->sb[t->sb_head];
+  int n = line->n_cols < cols ? line->n_cols : cols;
+  if (n > 0) memcpy(cells, line->cells, sizeof(VTermScreenCell) * n);
+  for (int i = n; i < cols; i++) {
+    memset(&cells[i], 0, sizeof(VTermScreenCell));
+    cells[i].width = 1;
+  }
+  return 1;
+}
+
+static int sb_clear(void *user) {
+  LuaVTerm *t = (LuaVTerm *) user;
+  t->sb_head = 0;
+  t->sb_count = 0;
+  return 1;
+}
+
+static const VTermScreenCallbacks sb_callbacks = {
+  .sb_pushline = sb_pushline,
+  .sb_popline  = sb_popline,
+  .sb_clear    = sb_clear,
+};
+
+
 static int f_new(lua_State *L) {
   int rows = (int) luaL_checkinteger(L, 1);
   int cols = (int) luaL_checkinteger(L, 2);
   LuaVTerm *t = (LuaVTerm *) lua_newuserdata(L, sizeof(LuaVTerm));
+  memset(t, 0, sizeof(*t));
   luaL_setmetatable(L, API_TYPE_VTERM);
   t->vt = vterm_new(rows, cols);
   vterm_set_utf8(t->vt, 1);
   t->screen = vterm_obtain_screen(t->vt);
   t->state  = vterm_obtain_state(t->vt);
   vterm_screen_reset(t->screen, 1);
+
+  t->sb_capacity = SB_CAPACITY;
+  t->sb = (SBLine *) calloc(t->sb_capacity, sizeof(SBLine));
+  if (t->sb) {
+    vterm_screen_set_callbacks(t->screen, &sb_callbacks, t);
+  }
   return 1;
 }
 
@@ -53,6 +127,11 @@ static int f_gc(lua_State *L) {
   if (t->vt) {
     vterm_free(t->vt);
     t->vt = NULL;
+  }
+  if (t->sb) {
+    for (int i = 0; i < t->sb_capacity; i++) free(t->sb[i].cells);
+    free(t->sb);
+    t->sb = NULL;
   }
   return 0;
 }
@@ -142,37 +221,62 @@ static size_t encode_utf8(uint32_t c, char *out) {
 }
 
 
-static int f_get_cell(lua_State *L) {
-  LuaVTerm *t = check_term(L, 1);
-  VTermPos pos;
-  pos.row = (int) luaL_checkinteger(L, 2);
-  pos.col = (int) luaL_checkinteger(L, 3);
-  VTermScreenCell cell;
-  if (!vterm_screen_get_cell(t->screen, pos, &cell)) {
-    lua_pushnil(L);
-    return 1;
-  }
+static void push_cell_table(lua_State *L, LuaVTerm *t, const VTermScreenCell *cell) {
   lua_newtable(L);
 
   char buf[32];
   size_t bp = 0;
-  for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell.chars[i]; i++) {
-    bp += encode_utf8(cell.chars[i], buf + bp);
+  for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell->chars[i]; i++) {
+    bp += encode_utf8(cell->chars[i], buf + bp);
     if (bp > sizeof(buf) - 8) break;
   }
   if (bp == 0) { buf[0] = ' '; bp = 1; }
   lua_pushlstring(L, buf, bp); lua_setfield(L, -2, "ch");
 
-  lua_pushinteger(L, cell.width);                 lua_setfield(L, -2, "width");
-  lua_pushboolean(L, cell.attrs.bold);            lua_setfield(L, -2, "bold");
-  lua_pushboolean(L, cell.attrs.italic);          lua_setfield(L, -2, "italic");
-  lua_pushboolean(L, cell.attrs.underline != 0);  lua_setfield(L, -2, "underline");
-  lua_pushboolean(L, cell.attrs.reverse);         lua_setfield(L, -2, "reverse");
-  lua_pushboolean(L, cell.attrs.strike);          lua_setfield(L, -2, "strike");
-  lua_pushboolean(L, cell.attrs.blink);           lua_setfield(L, -2, "blink");
+  lua_pushinteger(L, cell->width);                 lua_setfield(L, -2, "width");
+  lua_pushboolean(L, cell->attrs.bold);            lua_setfield(L, -2, "bold");
+  lua_pushboolean(L, cell->attrs.italic);          lua_setfield(L, -2, "italic");
+  lua_pushboolean(L, cell->attrs.underline != 0);  lua_setfield(L, -2, "underline");
+  lua_pushboolean(L, cell->attrs.reverse);         lua_setfield(L, -2, "reverse");
+  lua_pushboolean(L, cell->attrs.strike);          lua_setfield(L, -2, "strike");
+  lua_pushboolean(L, cell->attrs.blink);           lua_setfield(L, -2, "blink");
 
-  push_color(L, t->screen, cell.fg, "fg", 1);
-  push_color(L, t->screen, cell.bg, "bg", 0);
+  push_color(L, t->screen, cell->fg, "fg", 1);
+  push_color(L, t->screen, cell->bg, "bg", 0);
+}
+
+
+static int f_get_cell(lua_State *L) {
+  LuaVTerm *t = check_term(L, 1);
+  int row = (int) luaL_checkinteger(L, 2);
+  int col = (int) luaL_checkinteger(L, 3);
+
+  if (row < 0) {
+    int idx = -row;  /* row=-1 → newest scrollback line */
+    if (idx > t->sb_count || !t->sb) { lua_pushnil(L); return 1; }
+    int slot = (t->sb_head - idx + t->sb_capacity) % t->sb_capacity;
+    SBLine *line = &t->sb[slot];
+    if (col < 0 || col >= line->n_cols) { lua_pushnil(L); return 1; }
+    push_cell_table(L, t, &line->cells[col]);
+    return 1;
+  }
+
+  VTermPos pos;
+  pos.row = row;
+  pos.col = col;
+  VTermScreenCell cell;
+  if (!vterm_screen_get_cell(t->screen, pos, &cell)) {
+    lua_pushnil(L);
+    return 1;
+  }
+  push_cell_table(L, t, &cell);
+  return 1;
+}
+
+
+static int f_get_scrollback_count(lua_State *L) {
+  LuaVTerm *t = check_term(L, 1);
+  lua_pushinteger(L, t->sb_count);
   return 1;
 }
 
@@ -242,6 +346,34 @@ static const struct { const char *name; int key; } key_map[] = {
 };
 
 
+static int f_keyboard_start_paste(lua_State *L) {
+  LuaVTerm *t = check_term(L, 1);
+  vterm_keyboard_start_paste(t->vt);
+  return 0;
+}
+
+
+static int f_keyboard_end_paste(lua_State *L) {
+  LuaVTerm *t = check_term(L, 1);
+  vterm_keyboard_end_paste(t->vt);
+  return 0;
+}
+
+
+static int f_set_palette_color(lua_State *L) {
+  LuaVTerm *t = check_term(L, 1);
+  int idx = (int) luaL_checkinteger(L, 2);
+  int r   = (int) luaL_checkinteger(L, 3);
+  int g   = (int) luaL_checkinteger(L, 4);
+  int b   = (int) luaL_checkinteger(L, 5);
+  if (idx < 0 || idx > 255) return 0;
+  VTermColor col;
+  vterm_color_rgb(&col, (uint8_t) r, (uint8_t) g, (uint8_t) b);
+  vterm_state_set_palette_color(t->state, idx, &col);
+  return 0;
+}
+
+
 static int f_keyboard_key(lua_State *L) {
   LuaVTerm *t = check_term(L, 1);
   const char *name = luaL_checkstring(L, 2);
@@ -262,10 +394,14 @@ static const luaL_Reg meta[] = {
   { "output_read",      f_output_read       },
   { "resize",           f_resize            },
   { "get_size",         f_get_size          },
-  { "get_cell",         f_get_cell          },
-  { "get_cursor",       f_get_cursor        },
-  { "keyboard_unichar", f_keyboard_unichar  },
-  { "keyboard_key",     f_keyboard_key      },
+  { "get_cell",             f_get_cell             },
+  { "get_cursor",           f_get_cursor           },
+  { "get_scrollback_count", f_get_scrollback_count },
+  { "keyboard_unichar",    f_keyboard_unichar    },
+  { "keyboard_key",        f_keyboard_key        },
+  { "keyboard_start_paste", f_keyboard_start_paste },
+  { "keyboard_end_paste",   f_keyboard_end_paste   },
+  { "set_palette_color",   f_set_palette_color   },
   { NULL, NULL },
 };
 

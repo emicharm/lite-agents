@@ -1,0 +1,23 @@
+x terminal when claude cli opens scrolls all line of conversations, why this happens?
+x lite by default writes into file when there is an error that crashes editor
+
+x session viewer scroll to bottom when new messages arrive, and there is some delay between message written to file and session viewer shows it
+x terminal still receives f6 key, not passes it into editor. investigate general solution
+x file new_folder_open.txt contains error needed to be fixed
+x terminal scroll should match behavior of DocView. on touch pad moving up. scrolls down, and otherwise
+x terminal scroll is not smooth, its just line based, i like linebased, but scrolling between lines should be like in DocView
+x terminal shell when just inside shell, do not respect colors of theme, uses xterm colors
+x terminal selecting from terminal should be there, with copy cmd+c
+x terminal pasting cmd+v
+terminal panel resizing doesn't work
+make lite when running from terminal open window and release that terminal
+
+change cclog.sidebar when pressing show mode, increase show values by 20
+move how many to show values inside cclog.sidebar into plugins config file
+
+add to cclog config list of project that should not be shown at all
+some projects inside cclog has long name, we should scissor their length
+close tab button
+
+
+

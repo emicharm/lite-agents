@@ -462,12 +462,35 @@ function core.run()
 end
 
 
+local function user_error_log_path()
+  local home, dir, quote
+  if PLATFORM == "Windows" then
+    home = os.getenv("LOCALAPPDATA") or os.getenv("USERPROFILE")
+    dir = home and (home .. "\\lite")
+    quote = function(s) return '"' .. s .. '"' end
+  else
+    home = os.getenv("HOME")
+    dir = home and (home .. "/.cache/lite")
+    quote = function(s) return "'" .. s:gsub("'", "'\\''") .. "'" end
+  end
+  if not dir then return nil end
+  local mkcmd = PLATFORM == "Windows"
+    and ("mkdir " .. quote(dir) .. " >nul 2>&1")
+    or  ("mkdir -p " .. quote(dir))
+  os.execute(mkcmd)
+  return dir .. PATHSEP .. "error.txt"
+end
+
+
 function core.on_error(err)
-  -- write error to file
-  local fp = io.open(EXEDIR .. "/error.txt", "wb")
-  fp:write("Error: " .. tostring(err) .. "\n")
-  fp:write(debug.traceback(nil, 4))
-  fp:close()
+  -- write error to file in a user data dir so the project/exe dir isn't polluted
+  local path = user_error_log_path() or (EXEDIR .. PATHSEP .. "error.txt")
+  local fp = io.open(path, "wb")
+  if fp then
+    fp:write("Error: " .. tostring(err) .. "\n")
+    fp:write(debug.traceback(nil, 4))
+    fp:close()
+  end
   -- save copy of all unsaved documents
   for _, doc in ipairs(core.docs) do
     if doc:is_dirty() and doc.filename then

@@ -9,6 +9,8 @@
   #include <unistd.h>
 #elif __APPLE__
   #include <mach-o/dyld.h>
+  #include <stdlib.h>
+  #include <string.h>
 #endif
 
 
@@ -46,6 +48,12 @@ static void get_exe_filename(char *buf, int sz) {
 #elif __APPLE__
   unsigned size = sz;
   _NSGetExecutablePath(buf, &size);
+  char *resolved = realpath(buf, NULL);
+  if (resolved) {
+    strncpy(buf, resolved, sz - 1);
+    buf[sz - 1] = '\0';
+    free(resolved);
+  }
 #else
   strcpy(buf, "./lite");
 #endif

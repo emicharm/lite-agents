@@ -60,3 +60,8 @@ These hold for any change in this repo:
 - **Lua-only changes don't need a rebuild.** Restart `./lite` — no `build.sh` run necessary. Only rebuild when you touched `src/`.
 - **HiDPI is the renderer's responsibility, not the caller's.** Coordinates coming out of `src/api/system.c` (mouse, drops) are already pre-scaled by `get_scale()`. Lua code multiplies sizes by the global `SCALE` (e.g. `config.gap_size * SCALE`). Don't double-scale.
 - **Don't break the dirty-rect cache.** Any new renderer primitive must go through `rencache_*` (not call `ren_*` directly from Lua bindings) so per-cell hashing sees it and dirty rects are computed correctly. New `Command` fields must be hashable as part of `cmd->size`.
+
+## Task tracking
+
+- Simple tasks are written in todo.txt
+- When task is done you write at the start of line "x" to mark its complition
