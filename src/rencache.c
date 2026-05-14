@@ -11,7 +11,7 @@
 #define CELL_SIZE 96
 #define COMMAND_BUF_SIZE (1024 * 512)
 
-enum { FREE_FONT, SET_CLIP, DRAW_TEXT, DRAW_RECT };
+enum { FREE_FONT, SET_CLIP, DRAW_TEXT, DRAW_RECT, DRAW_ROUNDED_RECT, DRAW_CORNER_MASK };
 
 typedef struct {
   int type, size;
@@ -19,6 +19,7 @@ typedef struct {
   RenColor color;
   RenFont *font;
   int tab_width;
+  int radius;
   char text[0];
 } Command;
 
@@ -125,6 +126,28 @@ void rencache_draw_rect(RenRect rect, RenColor color) {
   if (cmd) {
     cmd->rect = rect;
     cmd->color = color;
+  }
+}
+
+
+void rencache_draw_rounded_rect(RenRect rect, int radius, RenColor color) {
+  if (!rects_overlap(screen_rect, rect)) { return; }
+  Command *cmd = push_command(DRAW_ROUNDED_RECT, sizeof(Command));
+  if (cmd) {
+    cmd->rect = rect;
+    cmd->color = color;
+    cmd->radius = radius;
+  }
+}
+
+
+void rencache_draw_corner_mask(RenRect rect, int radius, RenColor color) {
+  if (!rects_overlap(screen_rect, rect)) { return; }
+  Command *cmd = push_command(DRAW_CORNER_MASK, sizeof(Command));
+  if (cmd) {
+    cmd->rect = rect;
+    cmd->color = color;
+    cmd->radius = radius;
   }
 }
 
@@ -254,6 +277,12 @@ void rencache_end_frame(void) {
           break;
         case DRAW_RECT:
           ren_draw_rect(cmd->rect, cmd->color);
+          break;
+        case DRAW_ROUNDED_RECT:
+          ren_draw_rounded_rect(cmd->rect, cmd->radius, cmd->color);
+          break;
+        case DRAW_CORNER_MASK:
+          ren_draw_corner_mask(cmd->rect, cmd->radius, cmd->color);
           break;
         case DRAW_TEXT:
           ren_set_font_tab_width(cmd->font, cmd->tab_width);

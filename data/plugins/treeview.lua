@@ -185,7 +185,7 @@ end
 -- init
 local view = TreeView()
 local node = core.root_view:get_active_node()
-node:split("left", view, true)
+node:split("right", view, true)
 
 -- register commands and keymap
 command.add(nil, {
@@ -195,3 +195,49 @@ command.add(nil, {
 })
 
 keymap.add { ["ctrl+\\"] = "treeview:toggle" }
+
+
+-- Drag-to-resize on the tree's left edge. The tree is on the right and its
+-- containing node is locked, so the core divider drag doesn't apply; we
+-- intercept mouse events on RootView and drive config.treeview_size directly.
+local RootView = require "core.rootview"
+
+local function near_edge(x)
+  if not view.visible then return false end
+  local edge = view.position.x
+  return math.abs(x - edge) <= style.divider_size
+end
+
+local prev_mp = RootView.on_mouse_pressed
+function RootView:on_mouse_pressed(button, x, y, clicks)
+  if button == "left" and near_edge(x) then
+    self.tree_resizing = true
+    return
+  end
+  prev_mp(self, button, x, y, clicks)
+end
+
+local prev_mr = RootView.on_mouse_released
+function RootView:on_mouse_released(...)
+  if self.tree_resizing then
+    self.tree_resizing = false
+    return
+  end
+  prev_mr(self, ...)
+end
+
+local prev_mm = RootView.on_mouse_moved
+function RootView:on_mouse_moved(x, y, dx, dy)
+  if self.tree_resizing then
+    -- tree is on the right: dragging the edge right (dx > 0) shrinks it
+    local min_w = 50 * SCALE
+    local max_w = self.size.x - 100 * SCALE
+    config.treeview_size = common.clamp(config.treeview_size - dx, min_w, max_w)
+    view.size.x = config.treeview_size  -- skip animation while dragging
+    return
+  end
+  prev_mm(self, x, y, dx, dy)
+  if near_edge(x) then
+    system.set_cursor("sizeh")
+  end
+end

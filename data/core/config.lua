@@ -1,7 +1,10 @@
 local config = {}
 
 config.project_scan_rate = 5
-config.fps = 60
+config.fps = 120
+-- panel chrome (in unscaled pixels; multiplied by SCALE when used)
+config.gap_size = 6
+config.panel_radius = 6
 config.max_log_items = 80
 config.message_timeout = 3
 config.mouse_wheel_scroll = 50 * SCALE

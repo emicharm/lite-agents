@@ -25,7 +25,11 @@ function View:move_towards(t, k, dest, rate)
   if math.abs(val - dest) < 0.5 then
     t[k] = dest
   else
-    t[k] = common.lerp(val, dest, rate or 0.5)
+    -- treat `rate` as the per-frame lerp factor at 60fps, then rescale so
+    -- animation speed stays constant when config.fps changes
+    local r = rate or 0.5
+    r = 1 - (1 - r) ^ (60 / config.fps)
+    t[k] = common.lerp(val, dest, r)
   end
   if val ~= dest then
     core.redraw = true
@@ -132,7 +136,7 @@ end
 function View:draw_background(color)
   local x, y = self.position.x, self.position.y
   local w, h = self.size.x, self.size.y
-  renderer.draw_rect(x, y, w + x % 1, h + y % 1, color)
+  renderer.draw_rounded_rect(x, y, w + x % 1, h + y % 1, style.panel_radius, color)
 end
 
 

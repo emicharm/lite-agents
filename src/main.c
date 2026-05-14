@@ -15,11 +15,19 @@
 SDL_Window *window;
 
 
-static double get_scale(void) {
+double get_scale(void) {
+#if _WIN32
   float dpi;
   SDL_GetDisplayDPI(0, NULL, &dpi, NULL);
-#if _WIN32
   return dpi / 96.0;
+#elif __APPLE__
+  int win_w, win_h;
+  SDL_GetWindowSize(window, &win_w, &win_h);
+  SDL_Surface *surf = SDL_GetWindowSurface(window);
+  if (surf && win_w > 0) {
+    return (double) surf->w / (double) win_w;
+  }
+  return 1.0;
 #else
   return 1.0;
 #endif

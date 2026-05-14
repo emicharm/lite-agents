@@ -12,6 +12,7 @@
 #endif
 
 extern SDL_Window *window;
+extern double get_scale(void);
 
 
 static const char* button_name(int button) {
@@ -69,15 +70,17 @@ top:
       }
       goto top;
 
-    case SDL_DROPFILE:
+    case SDL_DROPFILE: {
+      double s = get_scale();
       SDL_GetGlobalMouseState(&mx, &my);
       SDL_GetWindowPosition(window, &wx, &wy);
       lua_pushstring(L, "filedropped");
       lua_pushstring(L, e.drop.file);
-      lua_pushnumber(L, mx - wx);
-      lua_pushnumber(L, my - wy);
+      lua_pushnumber(L, (mx - wx) * s);
+      lua_pushnumber(L, (my - wy) * s);
       SDL_free(e.drop.file);
       return 4;
+    }
 
     case SDL_KEYDOWN:
       lua_pushstring(L, "keypressed");
@@ -94,30 +97,36 @@ top:
       lua_pushstring(L, e.text.text);
       return 2;
 
-    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONDOWN: {
+      double s = get_scale();
       if (e.button.button == 1) { SDL_CaptureMouse(1); }
       lua_pushstring(L, "mousepressed");
       lua_pushstring(L, button_name(e.button.button));
-      lua_pushnumber(L, e.button.x);
-      lua_pushnumber(L, e.button.y);
+      lua_pushnumber(L, e.button.x * s);
+      lua_pushnumber(L, e.button.y * s);
       lua_pushnumber(L, e.button.clicks);
       return 5;
+    }
 
-    case SDL_MOUSEBUTTONUP:
+    case SDL_MOUSEBUTTONUP: {
+      double s = get_scale();
       if (e.button.button == 1) { SDL_CaptureMouse(0); }
       lua_pushstring(L, "mousereleased");
       lua_pushstring(L, button_name(e.button.button));
-      lua_pushnumber(L, e.button.x);
-      lua_pushnumber(L, e.button.y);
+      lua_pushnumber(L, e.button.x * s);
+      lua_pushnumber(L, e.button.y * s);
       return 4;
+    }
 
-    case SDL_MOUSEMOTION:
+    case SDL_MOUSEMOTION: {
+      double s = get_scale();
       lua_pushstring(L, "mousemoved");
-      lua_pushnumber(L, e.motion.x);
-      lua_pushnumber(L, e.motion.y);
-      lua_pushnumber(L, e.motion.xrel);
-      lua_pushnumber(L, e.motion.yrel);
+      lua_pushnumber(L, e.motion.x * s);
+      lua_pushnumber(L, e.motion.y * s);
+      lua_pushnumber(L, e.motion.xrel * s);
+      lua_pushnumber(L, e.motion.yrel * s);
       return 5;
+    }
 
     case SDL_MOUSEWHEEL:
       lua_pushstring(L, "mousewheel");

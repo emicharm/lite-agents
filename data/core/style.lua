@@ -1,8 +1,10 @@
 local common = require "core.common"
+local config = require "core.config"
 local style = {}
 
 style.padding = { x = common.round(14 * SCALE), y = common.round(7 * SCALE) }
-style.divider_size = common.round(1 * SCALE)
+style.divider_size = common.round(config.gap_size * SCALE)
+style.panel_radius = common.round(config.panel_radius * SCALE)
 style.scrollbar_size = common.round(4 * SCALE)
 style.caret_width = common.round(2 * SCALE)
 style.tab_width = common.round(170 * SCALE)
@@ -15,6 +17,7 @@ style.code_font = renderer.font.load(EXEDIR .. "/data/fonts/monospace.ttf", 13.5
 style.background = { common.color "#2e2e32" }
 style.background2 = { common.color "#252529" }
 style.background3 = { common.color "#252529" }
+style.background_outer = { common.color "#19191c" }
 style.text = { common.color "#97979c" }
 style.caret = { common.color "#93DDFA" }
 style.accent = { common.color "#e1e1e6" }

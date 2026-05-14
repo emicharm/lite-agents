@@ -72,6 +72,32 @@ static int f_draw_rect(lua_State *L) {
 }
 
 
+static int f_draw_rounded_rect(lua_State *L) {
+  RenRect rect;
+  rect.x = luaL_checknumber(L, 1);
+  rect.y = luaL_checknumber(L, 2);
+  rect.width = luaL_checknumber(L, 3);
+  rect.height = luaL_checknumber(L, 4);
+  int radius = luaL_checknumber(L, 5);
+  RenColor color = checkcolor(L, 6, 255);
+  rencache_draw_rounded_rect(rect, radius, color);
+  return 0;
+}
+
+
+static int f_draw_corner_mask(lua_State *L) {
+  RenRect rect;
+  rect.x = luaL_checknumber(L, 1);
+  rect.y = luaL_checknumber(L, 2);
+  rect.width = luaL_checknumber(L, 3);
+  rect.height = luaL_checknumber(L, 4);
+  int radius = luaL_checknumber(L, 5);
+  RenColor color = checkcolor(L, 6, 255);
+  rencache_draw_corner_mask(rect, radius, color);
+  return 0;
+}
+
+
 static int f_draw_text(lua_State *L) {
   RenFont **font = luaL_checkudata(L, 1, API_TYPE_FONT);
   const char *text = luaL_checkstring(L, 2);
@@ -90,8 +116,10 @@ static const luaL_Reg lib[] = {
   { "begin_frame",   f_begin_frame   },
   { "end_frame",     f_end_frame     },
   { "set_clip_rect", f_set_clip_rect },
-  { "draw_rect",     f_draw_rect     },
-  { "draw_text",     f_draw_text     },
+  { "draw_rect",         f_draw_rect         },
+  { "draw_rounded_rect", f_draw_rounded_rect },
+  { "draw_corner_mask",  f_draw_corner_mask  },
+  { "draw_text",         f_draw_text         },
   { NULL,            NULL            }
 };
 

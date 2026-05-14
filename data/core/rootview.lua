@@ -368,9 +368,13 @@ function Node:draw()
     core.push_clip_rect(pos.x, pos.y, size.x + pos.x % 1, size.y + pos.y % 1)
     self.active_view:draw()
     core.pop_clip_rect()
+    -- round panel corners by masking any over-draw with the outer background
+    renderer.draw_corner_mask(
+      self.position.x, self.position.y, self.size.x, self.size.y,
+      style.panel_radius, style.background_outer)
   else
-    local x, y, w, h = self:get_divider_rect()
-    renderer.draw_rect(x, y, w, h, style.divider)
+    -- no painted divider: the outer background already showing through
+    -- the gap between child nodes forms the visible separation
     self:propagate("draw")
   end
 end
@@ -493,6 +497,9 @@ end
 
 
 function RootView:draw()
+  -- fill the entire window (including the margin around the inset root)
+  local sw, sh = renderer.get_size()
+  renderer.draw_rect(0, 0, sw, sh, style.background_outer)
   self.root_node:draw()
   while #self.deferred_draws > 0 do
     local t = table.remove(self.deferred_draws)

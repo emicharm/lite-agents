@@ -298,6 +298,79 @@ void ren_draw_rect(RenRect rect, RenColor color) {
 }
 
 
+/* Per-pixel rounded primitives. Two modes share the same corner geometry:
+**   ROUNDED_FILL: paint pixels inside the rounded shape
+**   CORNER_MASK : paint only the four corner pixels OUTSIDE the rounded curve,
+**                 used to "cut" rounded corners out of square content the
+**                 view drew on top of a rounded panel.
+** Both clip against the global clip rect and use 8-bit alpha blend like
+** ren_draw_rect. */
+static void draw_rounded_internal(RenRect rect, int radius, RenColor color, bool mask) {
+  if (color.a == 0) { return; }
+  if (radius <= 0) {
+    if (!mask) { ren_draw_rect(rect, color); }
+    return;
+  }
+
+  int r = radius;
+  if (r > rect.width  / 2) r = rect.width  / 2;
+  if (r > rect.height / 2) r = rect.height / 2;
+  if (r <= 0) {
+    if (!mask) { ren_draw_rect(rect, color); }
+    return;
+  }
+
+  int x1 = rect.x, y1 = rect.y;
+  int x2 = rect.x + rect.width, y2 = rect.y + rect.height;
+
+  /* corner-center coordinates: the four (cx,cy) corners of the inscribed
+  ** rounded rect. A pixel is "inside" the rounded shape when, projecting it
+  ** to its nearest corner region, its distance² from the corner center is
+  ** ≤ r². Pixels outside any corner region are always inside. */
+  int cx1 = x1 + r;
+  int cy1 = y1 + r;
+  int cx2 = x2 - 1 - r;
+  int cy2 = y2 - 1 - r;
+  int r2  = r * r;
+
+  int xs = x1 < clip.left  ? clip.left  : x1;
+  int ys = y1 < clip.top   ? clip.top   : y1;
+  int xe = x2 > clip.right  ? clip.right  : x2;
+  int ye = y2 > clip.bottom ? clip.bottom : y2;
+
+  SDL_Surface *surf = SDL_GetWindowSurface(window);
+  RenColor *pixels = (RenColor*) surf->pixels;
+  int stride = surf->w;
+
+  for (int y = ys; y < ye; y++) {
+    int dy = y < cy1 ? cy1 - y : (y > cy2 ? y - cy2 : 0);
+    int dy2 = dy * dy;
+    /* mask mode only touches rows that contain a corner */
+    if (mask && dy == 0) continue;
+    RenColor *row = pixels + y * stride;
+    for (int x = xs; x < xe; x++) {
+      int dx = x < cx1 ? cx1 - x : (x > cx2 ? x - cx2 : 0);
+      bool in_corner = (dx > 0) && (dy > 0);
+      bool inside = !in_corner || (dx * dx + dy2 <= r2);
+      bool paint = mask ? (in_corner && !inside) : inside;
+      if (!paint) continue;
+      RenColor *d = row + x;
+      *d = (color.a == 0xff) ? color : blend_pixel(*d, color);
+    }
+  }
+}
+
+
+void ren_draw_rounded_rect(RenRect rect, int radius, RenColor color) {
+  draw_rounded_internal(rect, radius, color, false);
+}
+
+
+void ren_draw_corner_mask(RenRect rect, int radius, RenColor color) {
+  draw_rounded_internal(rect, radius, color, true);
+}
+
+
 void ren_draw_image(RenImage *image, RenRect *sub, int x, int y, RenColor color) {
   if (color.a == 0) { return; }
 
