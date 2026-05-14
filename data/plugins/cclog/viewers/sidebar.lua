@@ -132,8 +132,18 @@ function SessionsSidebar:_each_row()
       coroutine.yield("project", p, ox, y, w, ph)
       y = y + ph
       if p.expanded then
+        local count = 1
         for _, s in ipairs(p.sessions) do
+          if not p.show_more and count > 6 then
+            break
+          end
+
           coroutine.yield("session", s, ox, y, w, sh)
+          y = y + sh
+          count = count + 1
+        end
+        if count > 6 then
+          coroutine.yield("show_more", p, ox, y, w, sh)
           y = y + sh
         end
       end
@@ -191,6 +201,8 @@ function SessionsSidebar:on_mouse_pressed(button, x, y, clicks)
     self.hovered.ref._new = false
     self:open_session(self.hovered.ref)
     return true
+  elseif self.hovered.kind == "show_more" then
+    self.hovered.ref.show_more = not self.hovered.ref.show_more
   end
 end
 
@@ -246,6 +258,8 @@ function SessionsSidebar:draw()
   local hh = 0
 
   core.push_clip_rect(x0, y0 + hh, w, self.size.y - hh)
+  local spacing = style.font:get_width(" ") * 2
+
   for kind, ref, x, y, rw, rh in self:_each_row() do
     if kind == "project" then
       local hovered = (self.hovered and self.hovered.kind == "project" and self.hovered.ref == ref)
@@ -278,6 +292,14 @@ function SessionsSidebar:draw()
       elseif any_new then
         draw_dot(right - cw - 12 * SCALE, y + (rh - 6 * SCALE) / 2, col_new)
       end
+    elseif kind == "show_more" then
+      local hovered = (self.hovered and self.hovered.kind == "show_more" and self.hovered.ref == ref)
+      if hovered then
+        renderer.draw_rect(x, y, rw, rh, style.line_highlight)
+      end
+      local color = hovered and style.accent or style.text
+      local cx = x + style.padding.x
+      common.draw_text(style.font, color, self.hovered.ref.show_more and "Show less" or "Show more", nil, cx, y, 0, rh)
 
     else -- session
       local selected = (self.selected == ref)
@@ -288,7 +310,7 @@ function SessionsSidebar:draw()
         renderer.draw_rect(x, y, rw, rh, style.line_highlight)
       end
       local color = (hovered or selected) and style.accent or style.text
-      local indent = style.padding.x * 2 + style.icon_font:get_width("D")
+      local indent = style.padding.x
       local cx = x + indent
       -- Provider icon (with letter fallback) at the left of the row,
       -- vertically centred against the row height.
