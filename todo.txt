@@ -9,7 +9,7 @@ x terminal scroll is not smooth, its just line based, i like linebased, but scro
 x terminal shell when just inside shell, do not respect colors of theme, uses xterm colors
 x terminal selecting from terminal should be there, with copy cmd+c
 x terminal pasting cmd+v
-terminal panel resizing doesn't work
+x terminal panel resizing doesn't work
 make lite when running from terminal open window and release that terminal
 
 change cclog.sidebar when pressing show mode, increase show values by 20

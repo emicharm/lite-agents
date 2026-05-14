@@ -624,6 +624,42 @@ local panel = BottomPanelView()
 -- send later plugins (treeview, cclog) into the locked panel node.
 core.root_view.root_node.a:split("down", panel, true)
 
+-- ── Resizable divider ────────────────────────────────────────────────────
+--
+-- The panel is a locked split, so the parent vsplit's `divider` ratio is
+-- ignored — sizes come from panel.size. RootView:on_mouse_pressed still
+-- hit-tests the divider correctly (and the resize cursor still shows on
+-- hover), but on_mouse_moved's stock update to `divider` has no visible
+-- effect. Patch the instance so when the dragged divider is the one above
+-- the panel, we update panel.size.y / target_y directly instead, and
+-- persist the new height to config so toggling reopens at the same size.
+local function find_panel_parent_split(node)
+  if not node or node.type == "leaf" then return nil end
+  local function holds_panel(n)
+    return n and n.type == "leaf" and n.active_view == panel
+  end
+  if holds_panel(node.a) or holds_panel(node.b) then return node end
+  return find_panel_parent_split(node.a) or find_panel_parent_split(node.b)
+end
+
+local prev_rv_on_mouse_moved = core.root_view.on_mouse_moved
+
+function core.root_view:on_mouse_moved(x, y, dx, dy)
+  if self.dragged_divider and panel:is_visible() then
+    local parent = find_panel_parent_split(self.root_node)
+    if parent and self.dragged_divider == parent then
+      local min_h = panel:_tab_height() + math.floor(40 * SCALE)
+      local max_h = math.max(min_h, self.size.y - math.floor(80 * SCALE))
+      local new_h = common.clamp(panel.size.y - dy, min_h, max_h)
+      panel.target_y = new_h
+      panel.size.y   = new_h
+      config.terminal_panel_height = math.floor(new_h / SCALE)
+      return
+    end
+  end
+  return prev_rv_on_mouse_moved(self, x, y, dx, dy)
+end
+
 -- Intercept the global keymap dispatch so that when the panel (or one of
 -- its terminals) is focused, key events go through libvterm instead of
 -- running editor commands. The toggle binding itself still resolves first
