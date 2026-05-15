@@ -82,7 +82,7 @@ function M.normalise(line)
     tokens = 0,
   }
   if obj.summary and obj.summary ~= "" then
-    msg.summary = util.collapse_ws(obj.summary)
+    msg.summary = util.trim(obj.summary)
     return msg
   end
   if type(obj.message) == "table" then
@@ -98,7 +98,7 @@ function M.normalise(line)
     end
   end
   if type(obj.content) == "string" and not msg.summary then
-    msg.summary = util.collapse_ws(obj.content)
+    msg.summary = util.trim(obj.content)
   end
   msg.summary = msg.summary or obj.type or ""
   return msg

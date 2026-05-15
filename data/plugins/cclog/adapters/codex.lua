@@ -85,12 +85,12 @@ function M.normalise(line)
       local parsed = util.try_decode(p.arguments)
       if type(parsed) == "table" then inp = parsed end
     end
-    local parts = { "Tool " .. (p.name or "?") }
+    local parts = { p.name or "?" }
     if inp.description and inp.description ~= "" then
       table.insert(parts, util.collapse_ws(inp.description))
     end
     if inp.command and inp.command ~= "" then
-      table.insert(parts, util.collapse_ws(inp.command))
+      parts[#parts + 1] = "`" .. util.collapse_ws(inp.command) .. "`"
     end
     msg.kind, msg.summary = "tool_use", table.concat(parts, " - ")
     return msg

@@ -241,3 +241,5 @@ function RootView:on_mouse_moved(x, y, dx, dy)
     system.set_cursor("sizeh")
   end
 end
+
+return view

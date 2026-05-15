@@ -165,7 +165,10 @@ end
 -- full read_stats cost.
 data._active_cache = {}
 
+local active_window = 120 -- seconds; mtime must be within this to be "active"
+
 function data.is_active(path, mtime, source)
+  if not mtime or os.time() - mtime > active_window then return false end
   local cached = data._active_cache[path]
   if cached and cached.mtime == mtime then return cached.active end
   local provider = providers[source]

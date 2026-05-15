@@ -90,8 +90,8 @@ function M.normalise(line)
     local cmd  = d.command or (d.input and d.input.command) or ""
     if type(cmd) ~= "string" then cmd = "" end
     msg.summary = (cmd ~= "")
-                  and ("Tool " .. name .. " - " .. util.collapse_ws(cmd))
-                  or  ("Tool " .. name)
+                  and (name .. " - `" .. util.collapse_ws(cmd) .. "`")
+                  or  name
     return msg
   elseif t == "tool.execution_complete" then
     msg.kind = "tool_result"
