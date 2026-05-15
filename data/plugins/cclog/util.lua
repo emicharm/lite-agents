@@ -25,6 +25,14 @@ function util.collapse_ws(s)
   return (s:gsub("[\r\n\t]", " "):gsub("  +", " "))
 end
 
+-- Trim outer whitespace, normalise CRLF, but preserve interior newlines and
+-- indentation. Use this for text we intend to render as markdown.
+function util.trim(s)
+  s = (s or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+  s = s:gsub("^%s+", ""):gsub("%s+$", "")
+  return s
+end
+
 function util.truncate_lines(s, n)
   if not s or n <= 0 then return "" end
   local seen, idx = 0, 0
@@ -100,7 +108,7 @@ function util.summarise_content(content, role)
   for _, p in ipairs(content) do
     local t = p.type or ""
     if t == "text" or t == "input_text" or t == "output_text" then
-      table.insert(parts, util.collapse_ws(p.text or ""))
+      table.insert(parts, util.trim(p.text or ""))
     elseif t == "tool_use" then
       local inp = p.input or {}
       local tail = {}
@@ -108,9 +116,9 @@ function util.summarise_content(content, role)
         table.insert(tail, util.collapse_ws(inp.description))
       end
       if inp.command and inp.command ~= "" then
-        table.insert(tail, util.collapse_ws(inp.command))
+        tail[#tail + 1] = "`" .. util.collapse_ws(inp.command) .. "`"
       end
-      local s = "Tool " .. (p.name or "?")
+      local s = p.name or "?"
       if #tail > 0 then s = s .. " - " .. table.concat(tail, " - ") end
       table.insert(parts, s)
       kind = "tool_use"
@@ -158,6 +166,15 @@ function util.tail_read(path, n)
   local s = f:read(read_n) or ""
   f:close()
   return s
+end
+
+-- Encode an absolute cwd into the single directory name claude uses under
+-- ~/.claude/projects/. Empirically, claude maps every char that isn't
+-- [A-Za-z0-9-] to '-' (so '/', '.', '_', ' ', '[', ']' all collapse). Existing
+-- '-' chars and runs of unsafe chars produce runs of '-' (e.g. " ] " → "---").
+function util.encode_claude_cwd(cwd)
+  if not cwd or cwd == "" then return "" end
+  return (cwd:gsub("[^%w%-]", "-"))
 end
 
 -- Decode JSON, returning nil on failure rather than raising.

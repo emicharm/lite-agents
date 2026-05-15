@@ -13,8 +13,34 @@ local View   = require "core.view"
 local json   = require "libraries.json"
 local data   = require "plugins.cclog.model"
 local icons  = require "plugins.cclog.icons"
+local util   = require "plugins.cclog.util"
 
 local SessionView = View:extend()
+
+math.randomseed(os.time())
+
+-- UUID v4. claude --session-id requires a valid UUID; generated client-side so
+-- we know the .jsonl path before claude has created it.
+local function uuid_v4()
+  local function hexn(n)
+    local s = ""
+    for _ = 1, n do s = s .. string.format("%x", math.random(0, 15)) end
+    return s
+  end
+  return string.format("%s-%s-4%s-%x%s-%s",
+    hexn(8), hexn(4), hexn(3),
+    8 + math.random(0, 3), hexn(3), hexn(12))
+end
+
+local function shquote(s)
+  return "'" .. (s or ""):gsub("'", "'\\''") .. "'"
+end
+
+local function find_unlocked_leaf(n)
+  if not n then return nil end
+  if n.type == "leaf" then return (not n.locked) and n or nil end
+  return find_unlocked_leaf(n.a) or find_unlocked_leaf(n.b)
+end
 
 -- Tokyo Night auxiliaries that don't have a style.* slot.
 local function rgb(hex)
@@ -92,61 +118,182 @@ local function count_lines(s)
   return n
 end
 
--- Greedy word-wrap for plain text against a target pixel width.
--- Returns an array of lines. Words wider than max_w get hard-broken.
-local function wrap_text(font, s, max_w)
+-- ── Markdown ───────────────────────────────────────────────────────────────
+--
+-- A small markdown-flavoured parser: `code`, **bold**, *italic*, ATX headers,
+-- and fenced ``` code blocks. Anything else falls through as plain text.
+--
+-- Pipeline: parse_markdown(text) → blocks → wrap_blocks(blocks, max_w) →
+-- visual lines, each a list of {text, style} segments. Style names line up
+-- with what _draw_seg consumes below.
+
+local function font_for(style_name)
+  if style_name == "code" then return style.code_font end
+  return style.font
+end
+
+-- Inline scan: returns array of {text, style}. `base` is the fallback style
+-- applied to non-marked-up runs (e.g. "bold" for header lines).
+local function parse_inline(s, base)
+  base = base or "plain"
   local out = {}
-  if not s or s == "" then return { "" } end
-  if max_w <= 0 then return { s } end
-  for raw in (s .. "\n"):gmatch("([^\n]*)\n") do
-    if raw == "" then
-      out[#out + 1] = ""
-    else
-      local cur = ""
-      local i = 1
-      while i <= #raw do
-        local j = raw:find("%s", i)
-        local word
+  local function push(text, style_name)
+    if text == "" then return end
+    out[#out + 1] = { text = text, style = style_name }
+  end
+  local i, n = 1, #s
+  while i <= n do
+    local c = s:sub(i, i)
+    if c == "`" then
+      local j = s:find("`", i + 1, true)
+      if j then
+        push(s:sub(i + 1, j - 1), "code")
+        i = j + 1
+      else
+        push(c, base); i = i + 1
+      end
+    elseif c == "*" then
+      if s:sub(i + 1, i + 1) == "*" then
+        local j = s:find("**", i + 2, true)
         if j then
-          word = raw:sub(i, j - 1)
+          push(s:sub(i + 2, j - 1), "bold")
+          i = j + 2
+        else
+          push("*", base); i = i + 1
+        end
+      else
+        local j = s:find("*", i + 1, true)
+        if j then
+          push(s:sub(i + 1, j - 1), "italic")
           i = j + 1
         else
-          word = raw:sub(i)
-          i = #raw + 1
+          push("*", base); i = i + 1
         end
-        if word == "" then -- run of spaces; preserve a single space
-          if cur ~= "" and font:get_width(cur .. " ") <= max_w then
-            cur = cur .. " "
-          end
-        else
-          local trial = (cur == "") and word or (cur .. " " .. word)
-          if font:get_width(trial) <= max_w then
-            cur = trial
+      end
+    else
+      local nxt = s:find("[`*]", i)
+      if nxt then
+        push(s:sub(i, nxt - 1), base); i = nxt
+      else
+        push(s:sub(i), base); i = n + 1
+      end
+    end
+  end
+  return out
+end
+
+-- Split into per-source-line blocks. Each block is either a fenced code line
+-- (rendered as-is in code style), a header (whole line bold), or a regular
+-- line with inline parsing.
+local function parse_markdown(src)
+  local blocks = {}
+  if not src or src == "" then return { { segs = {} } } end
+  local in_fence = false
+  for raw in (src .. "\n"):gmatch("([^\n]*)\n") do
+    if raw:match("^%s*```") then
+      in_fence = not in_fence
+    elseif in_fence then
+      blocks[#blocks + 1] = { segs = { { text = raw, style = "code" } } }
+    else
+      local hashes, htext = raw:match("^(#+)%s+(.*)$")
+      if hashes and #hashes <= 6 then
+        blocks[#blocks + 1] = { segs = parse_inline(htext, "bold") }
+      else
+        blocks[#blocks + 1] = { segs = parse_inline(raw, "plain") }
+      end
+    end
+  end
+  if #blocks == 0 then blocks[1] = { segs = {} } end
+  return blocks
+end
+
+-- Lay out a segment list across visual lines bounded by max_w. Returns
+-- { { segs = {{text, style}, …} }, … }. Overlong words are hard-broken.
+local function layout_segs(segs, max_w)
+  local lines = { { segs = {}, w = 0 } }
+  local function newline()
+    lines[#lines + 1] = { segs = {}, w = 0 }
+  end
+  for _, seg in ipairs(segs) do
+    local f = font_for(seg.style)
+    local text = seg.text
+    local i = 1
+    while i <= #text do
+      local ws_at = text:find("%s", i)
+      local tok, kind, ni
+      if not ws_at then
+        tok = text:sub(i); kind = "word"; ni = #text + 1
+      elseif ws_at == i then
+        local j = i
+        while j <= #text and text:sub(j, j):match("%s") do j = j + 1 end
+        tok = text:sub(i, j - 1); kind = "space"; ni = j
+      else
+        tok = text:sub(i, ws_at - 1); kind = "word"; ni = ws_at
+      end
+      i = ni
+      local line = lines[#lines]
+      local tw = f:get_width(tok)
+      if kind == "space" then
+        if line.w > 0 then
+          if line.w + tw <= max_w then
+            line.segs[#line.segs + 1] = { text = tok, style = seg.style }
+            line.w = line.w + tw
           else
-            if cur ~= "" then out[#out + 1] = cur end
-            -- hard-break if a single word doesn't fit
-            while font:get_width(word) > max_w and #word > 1 do
-              local lo, hi = 1, #word
-              while lo < hi do
-                local m = math.floor((lo + hi + 1) / 2)
-                if font:get_width(word:sub(1, m)) <= max_w then
-                  lo = m
-                else
-                  hi = m - 1
-                end
-              end
-              if lo < 1 then lo = 1 end
-              out[#out + 1] = word:sub(1, lo)
-              word = word:sub(lo + 1)
+            newline()
+          end
+        end
+      else
+        if line.w + tw <= max_w then
+          line.segs[#line.segs + 1] = { text = tok, style = seg.style }
+          line.w = line.w + tw
+        elseif tw <= max_w then
+          if line.w > 0 then newline() end
+          line = lines[#lines]
+          line.segs[#line.segs + 1] = { text = tok, style = seg.style }
+          line.w = tw
+        else
+          local rest = tok
+          while #rest > 0 do
+            local lo, hi = 1, #rest
+            while lo < hi do
+              local m = math.floor((lo + hi + 1) / 2)
+              if f:get_width(rest:sub(1, m)) <= max_w then lo = m else hi = m - 1 end
             end
-            cur = word
+            if lo < 1 then lo = 1 end
+            local part = rest:sub(1, lo)
+            local pw   = f:get_width(part)
+            local cur  = lines[#lines]
+            if cur.w + pw > max_w and cur.w > 0 then
+              newline(); cur = lines[#lines]
+            end
+            cur.segs[#cur.segs + 1] = { text = part, style = seg.style }
+            cur.w = cur.w + pw
+            rest = rest:sub(lo + 1)
+            if #rest > 0 then newline() end
           end
         end
       end
-      if cur ~= "" then out[#out + 1] = cur end
     end
   end
-  if #out == 0 then out[1] = "" end
+  return lines
+end
+
+local function wrap_blocks(blocks, max_w)
+  local out = {}
+  if max_w <= 0 then
+    for _, b in ipairs(blocks) do out[#out + 1] = { segs = b.segs } end
+    return out
+  end
+  for _, b in ipairs(blocks) do
+    if #b.segs == 0 then
+      out[#out + 1] = { segs = {} }
+    else
+      for _, l in ipairs(layout_segs(b.segs, max_w)) do
+        out[#out + 1] = l
+      end
+    end
+  end
+  if #out == 0 then out[1] = { segs = {} } end
   return out
 end
 
@@ -246,7 +393,8 @@ end
 function SessionView:_wrap_summary(m)
   local _, summary_w = self:_summary_geometry()
   if m._wrap_w == summary_w and m._wrap_lines then return m._wrap_lines end
-  m._wrap_lines = wrap_text(style.font, m.summary or "", summary_w)
+  if not m._blocks then m._blocks = parse_markdown(m.summary or "") end
+  m._wrap_lines = wrap_blocks(m._blocks, summary_w)
   m._wrap_w = summary_w
   return m._wrap_lines
 end
@@ -309,13 +457,106 @@ function SessionView:on_mouse_wheel(y)
   self._was_at_bottom = false
 end
 
+function SessionView:_open_session_in_terminal()
+  local ok, term = pcall(require, "plugins.terminal")
+  if not ok or not term or not term.panel then
+    core.error("cclog: terminal plugin unavailable")
+    return
+  end
+  local id  = self.session and self.session.id
+  local cwd = self.session and self.session.cwd
+  if not id or id == "" then
+    core.error("cclog: no session id")
+    return
+  end
+  local cmd
+  if cwd and cwd ~= "" then
+    cmd = string.format(
+      "cd %s && claude --dangerously-skip-permissions --resume %s",
+      shquote(cwd), shquote(id))
+  else
+    cmd = string.format(
+      "claude --dangerously-skip-permissions --resume %s", shquote(id))
+  end
+  term.panel:add_terminal(cmd)
+  if not term.panel:is_visible() then term.panel:show() end
+  core.set_active_view(term.panel)
+end
+
+-- Start a fresh claude session. We pre-allocate a UUID via --session-id so the
+-- target .jsonl path is known up front; the SessionView's tail loop will pick
+-- the file up the moment claude writes the first record.
+function SessionView:_new_claude_session()
+  local cwd = self.session and self.session.cwd
+  if not cwd or cwd == "" then
+    core.error("cclog: no cwd for new session")
+    return
+  end
+  local term_ok, term = pcall(require, "plugins.terminal")
+  if not term_ok or not term or not term.panel then
+    core.error("cclog: terminal plugin unavailable")
+    return
+  end
+
+  local id = uuid_v4()
+  local home = os.getenv("HOME") or ""
+  local enc = util.encode_claude_cwd(cwd)
+  local path = home .. "/.claude/projects/" .. enc .. "/" .. id .. ".jsonl"
+
+  local new_session = {
+    id      = id,
+    path    = path,
+    source  = "claude",
+    last_dt = os.time(),
+    cwd     = cwd,
+    title   = "(new session)",
+  }
+
+  local v = SessionView(new_session)
+  local node = core.root_view:get_active_node()
+  if not node or node.locked then
+    node = find_unlocked_leaf(core.root_view.root_node)
+  end
+  if not node then
+    core.error("cclog: no node available for new session view")
+    return
+  end
+  node:add_view(v)
+
+  local cmd = string.format(
+    "cd %s && claude --dangerously-skip-permissions --session-id %s",
+    shquote(cwd), shquote(id))
+  term.panel:add_terminal(cmd)
+  if not term.panel:is_visible() then term.panel:show() end
+end
+
+local function point_in(r, x, y)
+  return r and x >= r.x and y >= r.y and x < r.x + r.w and y < r.y + r.h
+end
+
 function SessionView:on_mouse_moved(x, y, dx, dy)
   SessionView.super.on_mouse_moved(self, x, y, dx, dy)
   if self.dragging_scrollbar then self._was_at_bottom = false end
+  local oh = point_in(self._open_btn_rect, x, y)
+  local nh = point_in(self._new_btn_rect,  x, y)
+  if oh ~= self._open_btn_hovered or nh ~= self._new_btn_hovered then
+    self._open_btn_hovered = oh
+    self._new_btn_hovered  = nh
+    self.cursor = (oh or nh) and "hand" or nil
+    core.redraw = true
+  end
 end
 
 function SessionView:on_mouse_pressed(button, x, y, clicks)
   if SessionView.super.on_mouse_pressed(self, button, x, y, clicks) then
+    return true
+  end
+  if point_in(self._open_btn_rect, x, y) then
+    self:_open_session_in_terminal()
+    return true
+  end
+  if point_in(self._new_btn_rect, x, y) then
+    self:_new_claude_session()
     return true
   end
   -- Filter panel hits (vertical list on the right).
@@ -359,6 +600,31 @@ local function draw_text_clipped(font, color, text, x, y, max_w)
   -- naïve: just draw; lite's renderer doesn't word-wrap, and overlong text
   -- is fine because the next column starts further right.
   return renderer.draw_text(font, text, x, y, color)
+end
+
+-- Tints for markdown styles. No bold/italic faces are bundled, so bold is
+-- faked by double-striking and italic gets a slight palette shift.
+local col_md_code   = rgb "#7aa2f7"
+local col_md_italic = rgb "#bb9af7"
+
+-- base_color: overrides the per-style palette for the whole row. Used for
+-- subdued kinds (tool_use, tool_result) so they don't compete visually with
+-- user/assistant text.
+function SessionView:_draw_seg(seg, x, y, base_color)
+  local f = font_for(seg.style)
+  local color
+  if base_color then
+    color = base_color
+  elseif seg.style == "code"   then color = col_md_code
+  elseif seg.style == "italic" then color = col_md_italic
+  elseif seg.style == "bold"   then color = style.accent
+  else color = style.text end
+  local nx = renderer.draw_text(f, seg.text, x, y, color)
+  if seg.style == "bold" then
+    renderer.draw_text(f, seg.text, x + 1, y, color)
+    nx = nx + 1
+  end
+  return nx
 end
 
 -- Header: provider icon + title + a status line (model · tokens · time + an
@@ -417,6 +683,32 @@ function SessionView:_draw_header(x, y, w)
   local right = x + w - pad - self:_filter_panel_width()
   local tw = style.font:get_width(txt)
   common.draw_text(style.font, style.dim, txt, nil, right - tw, y, 0, h)
+
+  -- Buttons (rightmost: "open session", then "new session" to its left).
+  local btn_pad = math.floor(8 * SCALE)
+  local btn_h   = h - math.floor(8 * SCALE)
+  local btn_y   = y + (h - btn_h) / 2
+  local cursor_x = right - tw - pad * 2
+
+  local function place_button(label, hovered)
+    local lw = style.font:get_width(label)
+    local bw = lw + btn_pad * 2
+    local bx = cursor_x - bw
+    cursor_x = bx - math.floor(6 * SCALE)
+    local px = math.max(1, math.floor(SCALE))
+    local bg = hovered and style.background or col_chip_bg
+    renderer.draw_rect(bx, btn_y, bw, btn_h, bg)
+    renderer.draw_rect(bx, btn_y, bw, px, style.divider)
+    renderer.draw_rect(bx, btn_y + btn_h - px, bw, px, style.divider)
+    renderer.draw_rect(bx, btn_y, px, btn_h, style.divider)
+    renderer.draw_rect(bx + bw - px, btn_y, px, btn_h, style.divider)
+    common.draw_text(style.font, hovered and style.accent or style.text,
+                     label, "center", bx, btn_y, bw, btn_h)
+    return { x = bx, y = btn_y, w = bw, h = btn_h }
+  end
+
+  self._open_btn_rect = place_button("▶ open session", self._open_btn_hovered)
+  self._new_btn_rect  = place_button("+ new session",  self._new_btn_hovered)
 end
 
 -- Vertical filter list on the right edge of the body. Each kind gets a row
@@ -476,13 +768,20 @@ function SessionView:_draw_row(i, m, x, y, w)
                        x + pad + ts_w + kind_w, cy, style.dim)
   end
 
-  -- Wrapped summary column.
+  -- Wrapped summary column (markdown-aware).
   local sx, _ = self:_summary_geometry()
   local lines = self:_wrap_summary(m)
   local ly = cy
   local fh = style.font:get_height()
+  local base_color
+  if m.kind == "tool_use" or m.kind == "tool_result" then
+    base_color = style.dim
+  end
   for _, line in ipairs(lines) do
-    renderer.draw_text(style.font, line, x + sx, ly, style.text)
+    local lx = x + sx
+    for _, seg in ipairs(line.segs) do
+      lx = self:_draw_seg(seg, lx, ly, base_color)
+    end
     ly = ly + fh
   end
 

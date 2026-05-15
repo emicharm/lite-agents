@@ -464,8 +464,8 @@ function BottomPanelView:get_active_terminal()
   return self.terminals[self.active_idx]
 end
 
-function BottomPanelView:add_terminal()
-  local t = TerminalView()
+function BottomPanelView:add_terminal(cmd)
+  local t = TerminalView(cmd)
   table.insert(self.terminals, t)
   self.active_idx = #self.terminals
   return t
