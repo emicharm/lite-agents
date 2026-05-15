@@ -7,10 +7,17 @@
   #include <windows.h>
 #elif __linux__
   #include <unistd.h>
+  #include <fcntl.h>
+  #include <sys/types.h>
+  #include <sys/stat.h>
 #elif __APPLE__
   #include <mach-o/dyld.h>
   #include <stdlib.h>
   #include <string.h>
+  #include <unistd.h>
+  #include <fcntl.h>
+  #include <sys/types.h>
+  #include <sys/stat.h>
 #endif
 
 
@@ -77,11 +84,35 @@ static void init_window_icon(void) {
 }
 
 
+/* Detach from the launching terminal so `./lite` returns the shell prompt
+   immediately. Skipped when stderr isn't a TTY (already piped/redirected
+   by the parent) or when LITE_FOREGROUND=1 is set for debugging. */
+#if defined(__linux__) || defined(__APPLE__)
+static void detach_from_terminal(void) {
+  if (getenv("LITE_FOREGROUND")) return;
+  if (!isatty(STDERR_FILENO)) return;
+  pid_t pid = fork();
+  if (pid < 0) return;       /* fork failed: just keep going in this process */
+  if (pid > 0) _exit(0);     /* parent: hand the terminal back to the shell */
+  setsid();
+  int devnull = open("/dev/null", O_RDWR);
+  if (devnull >= 0) {
+    dup2(devnull, STDIN_FILENO);
+    dup2(devnull, STDOUT_FILENO);
+    dup2(devnull, STDERR_FILENO);
+    if (devnull > 2) close(devnull);
+  }
+}
+#endif
+
+
 int main(int argc, char **argv) {
 #ifdef _WIN32
   HINSTANCE lib = LoadLibrary("user32.dll");
   int (*SetProcessDPIAware)() = (void*) GetProcAddress(lib, "SetProcessDPIAware");
   SetProcessDPIAware();
+#else
+  detach_from_terminal();
 #endif
 
   SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);

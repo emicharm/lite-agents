@@ -62,6 +62,7 @@ end
 
 function Node:on_mouse_moved(x, y, ...)
   self.hovered_tab = self:get_tab_overlapping_point(x, y)
+  self.hovered_close = self:get_tab_close_overlapping_point(x, y)
   if self.type == "leaf" then
     self.active_view:on_mouse_moved(x, y, ...)
   else
@@ -215,6 +216,27 @@ function Node:get_tab_overlapping_point(px, py)
 end
 
 
+-- Close box sits at the right edge of a tab. Size matches one font line
+-- height so it remains comfortably clickable at any DPI.
+function Node:get_tab_close_rect(idx)
+  local x, y, w, h = self:get_tab_rect(idx)
+  local sz = style.font:get_height()
+  local pad = math.floor(style.padding.x / 2)
+  return x + w - sz - pad, y + math.floor((h - sz) / 2), sz, sz
+end
+
+
+function Node:get_tab_close_overlapping_point(px, py)
+  if #self.views == 1 then return nil end
+  for i = 1, #self.views do
+    local cx, cy, cw, ch = self:get_tab_close_rect(i)
+    if px >= cx and py >= cy and px < cx + cw and py < cy + ch then
+      return i
+    end
+  end
+end
+
+
 function Node:get_child_overlapping_point(x, y)
   local child
   if self.type == "leaf" then
@@ -349,9 +371,23 @@ function Node:draw_tabs()
       color = style.text
     end
     core.push_clip_rect(x, y, w, h)
-    x, w = x + style.padding.x, w - style.padding.x * 2
-    local align = style.font:get_width(text) > w and "left" or "center"
-    common.draw_text(style.font, color, text, align, x, y, w, h)
+    -- Close button at the right edge; reserve its width so the label can't
+    -- collide with it.
+    local cx, cy, csz = self:get_tab_close_rect(i)
+    local close_color = style.dim
+    if i == self.hovered_close then
+      close_color = style.accent
+      renderer.draw_rect(cx, cy, csz, csz, style.line_highlight)
+    elseif i == self.hovered_tab or view == self.active_view then
+      close_color = style.text
+    end
+    common.draw_text(style.font, close_color, "x", "center",
+                     cx, cy, csz, csz)
+    -- Label area: from after left padding to just before the close box.
+    local lx, lw = x + style.padding.x, (cx - x) - style.padding.x * 2
+    if lw < 0 then lw = 0 end
+    local align = style.font:get_width(text) > lw and "left" or "center"
+    common.draw_text(style.font, color, text, align, lx, y, lw, h)
     core.pop_clip_rect()
   end
 
@@ -429,6 +465,12 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     return
   end
   local node = self.root_node:get_child_overlapping_point(x, y)
+  local close_idx = node:get_tab_close_overlapping_point(x, y)
+  if close_idx and button == "left" then
+    node:set_active_view(node.views[close_idx])
+    node:close_active_view(self.root_node)
+    return
+  end
   local idx = node:get_tab_overlapping_point(x, y)
   if idx then
     node:set_active_view(node.views[idx])
