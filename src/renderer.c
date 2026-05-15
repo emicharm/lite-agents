@@ -106,6 +106,12 @@ void ren_free_image(RenImage *image) {
 }
 
 
+void ren_get_image_size(RenImage *image, int *w, int *h) {
+  *w = image->width;
+  *h = image->height;
+}
+
+
 /* Load an image file via stb_image. Returns NULL on failure. Pixels are
 ** stored in the same BGRA byte order ren_draw_image expects (the same order
 ** the SDL window surface uses), so they can be drawn directly.

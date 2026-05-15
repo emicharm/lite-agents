@@ -24,9 +24,20 @@ static int f_gc(lua_State *L) {
 }
 
 
+static int f_get_size(lua_State *L) {
+  RenImage **self = luaL_checkudata(L, 1, API_TYPE_IMAGE);
+  int w = 0, h = 0;
+  if (*self) { ren_get_image_size(*self, &w, &h); }
+  lua_pushnumber(L, w);
+  lua_pushnumber(L, h);
+  return 2;
+}
+
+
 static const luaL_Reg lib[] = {
-  { "__gc", f_gc   },
-  { "load", f_load },
+  { "__gc",     f_gc       },
+  { "load",     f_load     },
+  { "get_size", f_get_size },
   { NULL, NULL }
 };
 

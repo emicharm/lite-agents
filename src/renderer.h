@@ -19,6 +19,7 @@ void ren_get_size(int *x, int *y);
 RenImage* ren_new_image(int width, int height);
 RenImage* ren_load_image_file(const char *filename);
 void ren_free_image(RenImage *image);
+void ren_get_image_size(RenImage *image, int *w, int *h);
 
 RenFont* ren_load_font(const char *filename, float size);
 void ren_free_font(RenFont *font);
